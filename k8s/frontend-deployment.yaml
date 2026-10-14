@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: freshbox
+  labels:
+    app: frontend
+    project: freshbox-chacon
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        project: freshbox-chacon
+    spec:
+      # Reparte las replicas entre las 2 zonas de disponibilidad
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: frontend
+      containers:
+      - name: frontend
+        image: ${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/freshbox-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet: { path: /health, port: 80 }
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /health, port: 80 }
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 250m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: freshbox
+  labels:
+    app: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+  - port: 80
+    targetPort: 80

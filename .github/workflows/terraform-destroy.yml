@@ -1,0 +1,73 @@
+name: "Terraform Destroy"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: 'Escribe "yes" para confirmar la destruccion de TODA la infraestructura'
+        required: true
+        type: string
+
+concurrency:
+  group: freshbox-ep2
+  cancel-in-progress: false
+
+env:
+  TF_VAR_email_sns: ${{ secrets.EMAIL_SNS }}
+  TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+  TF_VAR_owner_name: ${{ secrets.OWNER_NAME }}
+  AWS_REGION: us-east-1
+
+jobs:
+  destroy:
+    name: "Terraform Destroy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event.inputs.confirm_destroy == 'yes'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        working-directory: ./environments/dev
+        run: terraform init -input=false
+
+      # El ALB lo creo el Ingress Controller (no Terraform): hay que borrarlo ANTES,
+      # si no la VPC y el SG del ALB no se pueden eliminar.
+      - name: Delete Ingress (elimina el ALB) y carga de prueba
+        continue-on-error: true
+        run: |
+          aws eks update-kubeconfig --name freshbox-cluster --region us-east-1
+          kubectl -n freshbox delete deployment load-generator --ignore-not-found
+          kubectl -n freshbox delete ingress --all --ignore-not-found --timeout=300s
+          for i in $(seq 1 30); do
+            if aws elbv2 describe-load-balancers --names freshbox-chacon-alb >/dev/null 2>&1; then
+              echo "ALB aun existe ($i/30)..."; sleep 10
+            else
+              echo "ALB eliminado"; break
+            fi
+          done
+
+      - name: Terraform Destroy
+        working-directory: ./environments/dev
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Limpiar log groups de Container Insights
+        continue-on-error: true
+        run: |
+          for lg in $(aws logs describe-log-groups --log-group-name-prefix /aws/containerinsights/freshbox-cluster --query 'logGroups[].logGroupName' --output text); do
+            aws logs delete-log-group --log-group-name "$lg"
+          done

@@ -1,0 +1,53 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+
+# Terraform lock files - pueden ser versionados pero con precaución
+# .terraform.lock.hcl
+
+
+
+# Credentials
+*.pem
+*.key
+*.csv
+
+# Variables reales con la password de RDS -- NUNCA subir esto
+environments/dev/terraform.tfvars
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Secretos de GitHub (no es necesario agregar, GitHub ya los maneja)
+# Los secrets nunca se suben al repositorio
+
+# Build outputs
+*.tar.gz
+dist/
+build/
+# Local
+kubeconfig*
+*.tfplan
+tfplan
+.txt

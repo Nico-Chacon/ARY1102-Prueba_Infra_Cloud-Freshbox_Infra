@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: update-product
+  namespace: freshbox
+  labels:
+    app: update-product
+    project: freshbox-chacon
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: update-product
+  template:
+    metadata:
+      labels:
+        app: update-product
+        project: freshbox-chacon
+    spec:
+      # Reparte las replicas entre las 2 zonas de disponibilidad
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: update-product
+      containers:
+      - name: update-product
+        image: ${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/freshbox-update-product:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3003
+        env:
+        - name: PORT
+          value: "3003"
+        - name: DB_HOST
+          valueFrom: { configMapKeyRef: { name: freshbox-config, key: DB_HOST } }
+        - name: DB_NAME
+          valueFrom: { configMapKeyRef: { name: freshbox-config, key: DB_NAME } }
+        - name: DB_PORT
+          valueFrom: { configMapKeyRef: { name: freshbox-config, key: DB_PORT } }
+        - name: DB_USER
+          valueFrom: { secretKeyRef: { name: freshbox-secret, key: DB_USER } }
+        - name: DB_PASS
+          valueFrom: { secretKeyRef: { name: freshbox-secret, key: DB_PASS } }
+        readinessProbe:
+          httpGet: { path: /health, port: 3003 }
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /health, port: 3003 }
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 250m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: update-product
+  namespace: freshbox
+  labels:
+    app: update-product
+spec:
+  type: ClusterIP
+  selector:
+    app: update-product
+  ports:
+  - port: 3003
+    targetPort: 3003

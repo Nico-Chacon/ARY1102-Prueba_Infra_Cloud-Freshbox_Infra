@@ -1,0 +1,73 @@
+name: "Redeploy K8s (sin tocar la infraestructura)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      rebuild_images:
+        description: 'Reconstruir y subir las 5 imagenes a ECR antes de desplegar'
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: freshbox-ep2
+  cancel-in-progress: false
+
+env:
+  TF_VAR_email_sns: ${{ secrets.EMAIL_SNS }}
+  TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+  TF_VAR_owner_name: ${{ secrets.OWNER_NAME }}
+  DB_USER: admin
+  DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+  AWS_REGION: us-east-1
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        working-directory: ./environments/dev
+        run: terraform init -input=false
+
+      - name: Set up QEMU
+        if: ${{ inputs.rebuild_images }}
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        if: ${{ inputs.rebuild_images }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        if: ${{ inputs.rebuild_images }}
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push images
+        if: ${{ inputs.rebuild_images }}
+        run: bash scripts/build-and-push.sh
+
+      - name: Read Terraform outputs
+        run: bash scripts/get-outputs.sh
+
+      - name: Deploy to EKS
+        env:
+          FORCE_RESTART: ${{ inputs.rebuild_images }}
+        run: bash scripts/deploy-k8s.sh

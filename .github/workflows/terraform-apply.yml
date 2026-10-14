@@ -1,0 +1,96 @@
+name: "Terraform Apply + Deploy EKS"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - 'app/**'
+      - 'k8s/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+concurrency:
+  group: freshbox-ep2
+  cancel-in-progress: false
+
+env:
+  TF_VAR_email_sns: ${{ secrets.EMAIL_SNS }}
+  TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+  TF_VAR_owner_name: ${{ secrets.OWNER_NAME }}
+  DB_USER: admin
+  DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+  AWS_REGION: us-east-1
+
+jobs:
+  apply:
+    name: "Infra + Imagenes + K8s"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        working-directory: ./environments/dev
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        working-directory: ./environments/dev
+        run: terraform validate
+
+      - name: Terraform Format Check
+        continue-on-error: true
+        run: terraform fmt -check -recursive
+
+      # 1) Repositorios ECR primero (las imagenes deben existir antes de los pods)
+      - name: Create ECR repositories
+        working-directory: ./environments/dev
+        run: terraform apply -auto-approve -input=false -target=module.ecr
+
+      # 2) Imagenes ARM64 (nodos t4g.small = Graviton) -> necesita QEMU + buildx
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push 5 Docker images (arm64)
+        run: bash scripts/build-and-push.sh
+
+      # 3) Red, SG, RDS Multi-AZ, EKS, Node Group, add-ons, monitoreo
+      - name: Terraform Plan
+        working-directory: ./environments/dev
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./environments/dev
+        run: terraform apply -auto-approve -input=false tfplan
+
+      # 4) Kubernetes: ALB Controller, Autoscaler, manifiestos, init BD, HPA, Ingress
+      - name: Read Terraform outputs
+        run: bash scripts/get-outputs.sh
+
+      - name: Deploy to EKS
+        env:
+          FORCE_RESTART: "true"
+        run: bash scripts/deploy-k8s.sh

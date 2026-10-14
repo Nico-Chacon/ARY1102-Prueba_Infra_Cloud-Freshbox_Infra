@@ -1,0 +1,27 @@
+# Carga CONTROLADA para demostrar el HPA. Aplicar para iniciar, borrar para detener:
+#   kubectl apply -f k8s/load-test.yaml
+#   kubectl delete -f k8s/load-test.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: freshbox
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+      - name: load
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        args:
+        - while true; do wget -q -O /dev/null http://get-products:3001/api/products; done
+        resources:
+          requests: { cpu: 10m, memory: 16Mi }
+          limits: { cpu: 100m, memory: 32Mi }

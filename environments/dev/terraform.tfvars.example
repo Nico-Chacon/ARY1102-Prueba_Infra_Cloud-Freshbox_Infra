@@ -1,0 +1,7 @@
+# Copia a terraform.tfvars SOLO para uso local. En GitHub Actions se usan los secrets.
+aws_region   = "us-east-1"
+project_name = "freshbox"
+student_tag  = "chacon"
+owner_name   = "chacon"
+db_password  = "CambiaEstaPassword123"
+email_sns    = "tu_correo@duocuc.cl"

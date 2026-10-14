@@ -1,0 +1,50 @@
+# Migracion/carga de datos: ejecuta init.sql contra RDS desde DENTRO de la VPC
+# (RDS es privado). Idempotente: solo inserta si la tabla esta vacia.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  namespace: freshbox
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mysql-client
+        image: mysql:8.4
+        env:
+        - name: DB_HOST
+          valueFrom: { configMapKeyRef: { name: freshbox-config, key: DB_HOST } }
+        - name: DB_NAME
+          valueFrom: { configMapKeyRef: { name: freshbox-config, key: DB_NAME } }
+        - name: DB_USER
+          valueFrom: { secretKeyRef: { name: freshbox-secret, key: DB_USER } }
+        - name: MYSQL_PWD
+          valueFrom: { secretKeyRef: { name: freshbox-secret, key: DB_PASS } }
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -u
+          echo "Esperando RDS en $DB_HOST ..."
+          for i in $(seq 1 60); do
+            mysql -h "$DB_HOST" -u "$DB_USER" -e "SELECT 1" >/dev/null 2>&1 && break
+            echo "  intento $i/60"; sleep 5
+          done
+          mysql -h "$DB_HOST" -u "$DB_USER" -e "SELECT 1" >/dev/null || { echo "RDS no responde"; exit 1; }
+          COUNT=$(mysql -h "$DB_HOST" -u "$DB_USER" -N -B -e "SELECT COUNT(*) FROM ${DB_NAME}.productos" 2>/dev/null || echo 0)
+          if [ "$COUNT" = "0" ]; then
+            echo "Tabla vacia o inexistente: cargando init.sql ..."
+            mysql -h "$DB_HOST" -u "$DB_USER" < /sql/init.sql
+          else
+            echo "La tabla ya tiene $COUNT filas: se omite init.sql"
+          fi
+          mysql -h "$DB_HOST" -u "$DB_USER" -e "SELECT id,nombre,precio,stock,categoria FROM ${DB_NAME}.productos;"
+          echo "=== Migracion de datos OK ==="
+        volumeMounts:
+        - name: sql
+          mountPath: /sql
+      volumes:
+      - name: sql
+        configMap:
+          name: db-init-sql
