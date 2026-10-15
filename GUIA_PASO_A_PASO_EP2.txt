@@ -19,7 +19,7 @@
 
 > **Tiempo estimado:** Fase 0–1: 1 h · Fase 3 (el workflow corre solo): 40 min · Resto: 2–3 h. Deja el despliegue funcionando **antes** del día de la defensa.
 
----
+--- 
 
 ## FASE 0 — Preparación (cuentas, bucket de estado, repo y secrets)
 
